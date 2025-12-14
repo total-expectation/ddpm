@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-import torch.nn.Functional as F
+import torch.nn.functional as F
 
 # x - embedding
 # Q,K,V matrices
@@ -11,13 +11,18 @@ class SelfAttention(nn.Module):
     
     def __init__(self, in_dim, out_dim):
         super().__init__()
-        self.dim = out_dim
+        self.in_dim = in_dim
+        self.out_dim = out_dim
         self.Q = nn.Linear(in_dim, out_dim)
         self.K = nn.Linear(in_dim, out_dim)
         self.V = nn.Linear(in_dim, out_dim)
+        self.group_norm = nn.GroupNorm(32, in_dim)
         
         
     def compute_qkv(self, X):
+        print(X.shape)
+        X.transpose(dim0=1, dim1=-1)
+        print(X.shape)
         Q_x = self.Q(X)
         K_x = self.K(X)
         V_x = self.V(X)
@@ -30,7 +35,7 @@ class SelfAttention(nn.Module):
         return F.softmax(scores,dim=-1)
 
     def forward(self, X):
-        X = nn.GroupNorm(32, self.dim * 2 if self.dim == 32 else self.dim)  #TODO: not sure about the output dimen, need to experiment??
+        X = self.group_norm(X) #TODO: not sure about the output dimen, need to experiment??
         Q, K, V = self.compute_qkv(X)
         scores = self.compute_attention_matrix(Q, K)
         return scores @ V
