@@ -89,6 +89,7 @@ class SPE(nn.Module):
         embeddings = torch.cat((embeddings.sin(), embeddings.cos()), dim=-1)
         return embeddings
 
+
 class Unet(nn.Module):
     """
     Time Conditioned UNet
@@ -131,7 +132,6 @@ class Unet(nn.Module):
         #project back up to original size
         self.output = nn.Conv2d(up_channels[-1], in_channels,kernel_size=3,padding=1)
     
-    
     def forward(self,x,t):
         # Get time embedding
         time_embedding=self.mlp(t)
@@ -152,4 +152,76 @@ class Unet(nn.Module):
             x = x + skip_connection.pop()
             
         return self.output(x)
+        
+
+class DDPM(nn.Module):
+    def __init__(self, T=1000):
+        super().__init__()
+        self.T = T
+        self.epsilon_model=Unet(1)
+        #beta
+        #alpha
+        #alphabar
+        #beta_tilde
+        #sigma
+        self.beta = torch.linspace(1e-4, 2e-2, T).to(device)
+        self.alpha = 1 - self.beta
+        self.alpha_bar = torch.cumprod(self.alpha,dim=0)
+        self.alpha_bar_0=torch.tensor([1.0],device=self.alpha_bar.device)
+        self.alpha_bar=torch.cat([self.alpha_bar_0,self.alpha_bar])
+        #self.register_buffer('alpha_bar', torch.cat([self.alpha_bar_0, self.alpha_bar]))
+        self.beta_tilde_1_to_T = (1.0 - self.alpha_bar[:-1]) / (1.0 - self.alpha_bar[1:]) * self.beta
+        self.beta_tilde_0 = torch.tensor([0.0], device=self.alpha_bar.device)
+        self.beta_tilde = torch.cat([self.beta_tilde_0, self.beta_tilde_1_to_T])
+        
+    def forward(self,x):
+        """
+        Alg 1 from DDPM Paper
+        1. Sample random time step
+        2. sample random noise 
+        3. noise input to create x_t
+        4. predict noise using unet
+        5. return loss between predicted and actual noise
+        """
+        bs = x.shape[0]
+        t = torch.randint(low=0, high=self.T, size=(bs,), device=x.device)
+        noise = torch.randn(x.shape, device=x.device)
+        noisy_img = self.diffusion_kernel(x, t, noise)
+        pred_noise=self.epsilon_model(noisy_img, t)
+        
+        return pred_noise, noise
+
+    def diffusion_kernel(self, x, t, noise):
+        # Get the alpha values for the specific time steps
+        alpha_t = self.alpha_bar[t]
+        
+        # Reshape alpha_t to (Batch, 1, 1, 1) so it can broadcast against the image (Batch, C, H, W)
+        alpha_t = alpha_t.view(-1, 1, 1, 1)
+        
+        return torch.sqrt(alpha_t) * x + torch.sqrt(1 - alpha_t) * noise
+
+        #return torch.sqrt(self.alpha_bar[t]) * x + torch.sqrt(1 - self.alpha_bar[t]) * noise
+
+    def sample(self,num_samples,size=(1,28,28),t=0):
+        """
+        Sample image from random noise.
+        Alg 2 from DDPM paper.
+        1. Starts from pure noise.
+        2. Denoises to generate new samples.
+        """
+        #generate random sample for t=T, X_T= N(0,1)
+        x_T = torch.random(num_samples, *size).to(device)
+        #step time backwards
+        x_u=x_T
+        for u in range (self.T,t,-1):
+            z=torch.randn_like(x_u) if u > t+1 else 0
+            epsilon = self.epsilon_model(x_u,u) # noise prediction network
+            #need values from different time steps
+            sigma_t = (1 - self.alpha_bar[u-1])/(1 - self.alpha_bar[u]) * self.beta[u]
+            x_u_minus_1 = (1 / torch.sqrt(self.alpha[u]) *( x_u - (1 - self.alpha[u]) / torch.sqrt(1 - self.alpha_bar[u]) * epsilon) + sigma_t*z )
+            x_u=x_u_minus_1
+        return x_u
+
+    def loss(pred_noise, true_noise):
+        return F.mse_loss(pred_noise, true_noise)
         
