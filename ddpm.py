@@ -3,7 +3,7 @@ import torch.nn as nn
 import torchvision
 import torch.nn.functional as F
 import torch.optim as optim
-from attention import SelfAttention
+from attention import MultiHeadAttention
 from torchvision import datasets
 from torchvision.transforms import transforms
 import matplotlib as plt
@@ -36,11 +36,11 @@ class ResNetBlock(nn.Module):
         super().__init__()
         self.conv1 = nn.Conv2d(in_channel, out_channel, kernel_size=3, stride=1, padding=1)
         self.time_emb_proj = nn.Linear(time_embedding_dim, out_channel)  # TODO: ??? What is the right dimensions??
-        self.group_norm1 = nn.GroupNorm(out_channel, out_channel)
+        self.group_norm1 = nn.GroupNorm(32, out_channel)
         self.gelu = nn.GELU()
         self.dropout = nn.Dropout(p=dropout)
         self.conv2 = nn.Conv2d(out_channel, out_channel, kernel_size=3, stride=1, padding=1)
-        self.group_norm2 = nn.GroupNorm(out_channel, out_channel)
+        self.group_norm2 = nn.GroupNorm(32, out_channel)
         self.out=nn.Conv2d(in_channel,out_channel,kernel_size=1)
 
     def forward(self, x,time_emb):
@@ -63,12 +63,11 @@ class AttentionBlock(ResNetBlock):
     
     def __init__(self, in_channel, out_channel, time_embedding_dim, dropout=0.1):
         super().__init__(in_channel, out_channel, time_embedding_dim, dropout)
-        self.attention=SelfAttention(in_dim=in_channel,out_dim=in_channel)
+        self.attention=MultiHeadAttention(in_dim=out_channel,out_dim=out_channel)
         
     def forward(self, x,time_emb):
-        h=self.attention(x)
-        h=super().forward(h,time_emb)
-        
+        h=super().forward(x,time_emb)
+        h=self.attention(h)
         return h
         
 class SPE(nn.Module):
@@ -148,9 +147,9 @@ class Unet(nn.Module):
             x=block(x,time_embedding)
         x += skip_connection_bottom
 
-        for i, block in enumerate(self.up):
+        for block in self.up:
             x=block(x,time_embedding)
-            x += skip_connection[::-1][i]
+            x = x + skip_connection.pop()
             
         return self.output(x)
         
