@@ -3,7 +3,7 @@ import torch.nn as nn
 
 def conv_block(in_channels, out_channels, up=False):
     ConvLayer = nn.ConvTranspose2d if up else nn.Conv2d
-    output_padding = 1
+
     if up:
         return nn.Sequential(
             nn.ConvTranspose2d(
@@ -12,7 +12,8 @@ def conv_block(in_channels, out_channels, up=False):
                 kernel_size=4, 
                 stride=2, 
                 padding=1, 
-                output_padding=output_padding
+                output_padding=1
+
             ),
             nn.BatchNorm2d(out_channels),
             nn.LeakyReLU()
@@ -58,7 +59,7 @@ class VAE(nn.Module):
         self.decoder = nn.Sequential(
             conv_block(down_channels[2], up_channels[0], up=True),
             conv_block(up_channels[0], up_channels[1], up=True),
-            nn.ConvTranspose2d(up_channels[1], channels, kernel_size=4, stride=2, padding=1)
+            nn.ConvTranspose2d(up_channels[1], channels, kernel_size=4, stride=2, padding=2)
         )
 
     def loss(self, x_hat, x, mean, logvar, beta):
@@ -84,4 +85,4 @@ class VAE(nn.Module):
         mean, logvar = self.encode(x)
         z = self.reparam(mean, logvar)
         out = self.decode(z)
-        return out
+        return out, mean, logvar
